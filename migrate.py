@@ -192,7 +192,7 @@ def main():
 
   if args.user == None:
     args.user = []
-  for fname in args.csv:
+  for fname in args.csv or ():
     try:
       with open(fname[0], 'r') as fp:
         for line in csv.reader(fp):

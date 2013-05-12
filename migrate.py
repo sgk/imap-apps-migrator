@@ -24,8 +24,8 @@ IMAP_SEEN = r'\Seen'
 IMAP_FLAGGED = r'\Flagged'
 IMAP_DRAFT = r'\Draft'
 
-migration_prefix = u'移行'
-migration_nodate = u'移行/日付なし'
+default_label = 'IMAP'
+nodate_label = 'No Date'
 default_date = 'Thu, 1 Jan 1970 00:00:00 +0000'
 
 def progress(a, b):
@@ -105,6 +105,10 @@ class AppsDestination:
     self.n_messages = 0
     self.n_errors = 0
 
+  def clear(self):
+    self.n_messages = 0
+    self.n_errors = 0
+
   def sink(self, username, rfc822, properties, labels):
     try:
       self.service.ImportMail(
@@ -121,20 +125,23 @@ class AppsDestination:
       self.n_errors += 1
 
 class Migrate:
-  def __init__(self, domain, admin, password):
-    self.dst = AppsDestination(domain, admin, password)
+  def __init__(self, domain='', admin='', password=''):
+    if domain and admin and password:
+      self.dst = AppsDestination(domain, admin, password)
+    else:
+      self.dst = None
     self.domain = domain
 
-  def migrate(self, imapserver, login, password, appsusername):
+  def migrate(self, imapserver, login, password, appsusername, prefix):
     src = IMAPsource(imapserver)
     src.login(login, password)
 
     for folder, label in src.folders():
       if label[0] == 'INBOX':
         label.pop(0)
-      label.insert(0, migration_prefix)
+      label.insert(0, prefix)
       label = '/'.join(label)
-      print label
+      print label + ' ' * 15
 
       for flags, rfc822 in src.messages(folder):
         labels = [label]
@@ -142,7 +149,7 @@ class Migrate:
         if not message.has_key('Date'):
           message['Date'] = default_date
           rfc822 = message.as_string()
-          labels.append(migration_nodate)
+          labels.append(prefix + '/' + nodate_label)
 
         properties = []
         if IMAP_SEEN not in flags:
@@ -152,42 +159,51 @@ class Migrate:
         if IMAP_DRAFT in flags:
           properties.append('IS_DRAFT')
 
-        self.dst.sink(appsusername, rfc822, properties, labels)
+        if self.dst:
+          self.dst.sink(appsusername, rfc822, properties, labels)
 
     src.logout()
 
-    print 'Retrieved from %s@%s; %d messages %d errors.' % (
+    print 'Retrieved from "%s" on "%s"; %d messages %d errors.' % (
       login, imapserver,
       src.n_messages, src.n_errors,
     )
-    print 'Fed into %s@%s; %d messages %d errors.' % (
-      appsusername, self.domain,
-      self.dst.n_messages, self.dst.n_errors,
-    )
+
+    if self.dst:
+      print 'Fed into "%s@%s"; %d messages %d errors.' % (
+        appsusername, self.domain,
+        self.dst.n_messages, self.dst.n_errors,
+      )
+      self.dst.clear()
 
 def main():
   parser = argparse.ArgumentParser(
-      description='IMAP4 to Google Apps email migration tool.')
-  parser.add_argument('--domain', required=True,
-      help='Google Apps hosted domain name.')
-  parser.add_argument('--admin', required=True,
-      help='Google Apps domain admin account.')
-  parser.add_argument('--password',
-      help='Password for admin account.')
+      description='IMAP4 to Google Apps email migration tool.',
+      epilog='Dry run if domain or admin is not given.')
+  parser.add_argument('--domain', help='Google Apps hosted domain name.')
+  parser.add_argument('--admin', help='Google Apps domain admin account.')
+  parser.add_argument('--password', help='Password for admin account.')
   parser.add_argument('--server', required=True,
-      help='IMAP4 server FQDN.')
+      help='IMAP4 server hostname.')
+  parser.add_argument('--label', default=default_label,
+      help='Label for migrated messages if no "/label" for username.')
   parser.add_argument(
     '--user', action='append',
     nargs=3, metavar=('login', 'password', 'username'),
-    help='User information for migration; IMAP4 login name, password, Google Apps username'
+    help=
+      'User information for migration; IMAP4 login name, password, '
+      'Google Apps username. Username can have "/label" suffix to '
+      'set the label to migrated messages.'
   )
   parser.add_argument(
     '--csv', action='append', nargs=1,
     help='Read user information from CSV file.'
   )
+  parser.add_argument('--dry-run', action='store_true', default=False,
+      help='Only check IMAP server, no message will be migrated.')
 
   args = parser.parse_args()
-  if '@' not in args.admin:
+  if args.admin and '@' not in args.admin:
     args.admin += '@' + args.domain
 
   if args.user == None:
@@ -212,12 +228,23 @@ def main():
     sys.exit(1)
 
   try:
-    if not args.password:
-      args.password = getpass.getpass('Admin Password: ')
-    migrate = Migrate(args.domain, args.admin, args.password)
+    if args.domain and args.admin and not args.dry_run:
+      if not args.password:
+        args.password = getpass.getpass('Admin Password: ')
+      migrate = Migrate(args.domain, args.admin, args.password)
+    else:
+      print 'Dry run...'
+      migrate = Migrate()       # dry run
+
     for login, password, username in args.user:
-      print 'Migrating %s to %s' % (login, username)
-      migrate.migrate(args.server, login, password, username)
+      if '/' in username:
+        username, label = username.split('/', 1)
+      else:
+        label = args.label
+      label = label.decode('utf-8')
+      print 'Migrating "%s" to "%s" with label "%s".' % (login, username, label)
+      migrate.migrate(args.server, login, password, username, label)
+
   except gdata.service.BadAuthentication, e:
     print e
     sys.exit(1)

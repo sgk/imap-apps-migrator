@@ -28,6 +28,24 @@ optional arguments:
 Dry run if domain or admin is not given.
 ```
 
+## Feature (not in Google's Tool)
+
+The feature not in Google's official tool is only one thing that the migrated email messages will be labeled with nested labels under specified "--label LABEL".
+
+## Example
+
+Command line:
+```
+% ./migrate.py --domain example.com --admin john --server imap.example.com --csv migrate.csv
+```
+
+"migrate.csv" content:
+```
+alice,a8Fmanvj,alice/Old
+bob,Udmafmd3,bob/Old
+info,KyGVdu3A,alice/info
+```
+
 ## TODO
 
  * Process multiple accounts in parallel (multi-thread).
